@@ -53,7 +53,7 @@ def draw_labels(image, class_ids, confidences, boxes, classes):
     return image
 
 if __name__ == "__main__":
-    image_path = "C:/Users/aarya/Downloads/office.jpeg"
+    image_path = r"C:\Users\aarya\Downloads\office.jpeg"
     
     net, classes, output_layers = load_yolo_model()
     class_ids, confidences, boxes = detect_objects(image_path, net, classes, output_layers)
