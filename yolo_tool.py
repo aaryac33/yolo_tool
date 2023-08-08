@@ -1,66 +1,57 @@
 import cv2
+import torch
+from models.experimental import attempt_load
+from utils.general import non_max_suppression
 import numpy as np
+import argparse
 
-def load_yolo_model():
-    net = cv2.dnn.readNet("C:/Users/aarya/OneDrive/Desktop/Assert.ai/yolov5/yolov5s.pt", "C:/Users/aarya/OneDrive/Desktop/Assert.ai/yolov5/.venv/Lib/site-packages/ultralytics/yolo/cfg/default.yaml")
-    with open("coco.names", "r") as f:
-        classes = [line.strip() for line in f.readlines()]
+ap = argparse.ArgumentParser()
+ap.add_argument('-i', '--image', required=True,
+                help = 'Input image')
+ap.add_argument('-cl', '--classes', required=True,
+                help = 'Text file containing class names')
+args = ap.parse_args()
 
-    layer_names = net.getLayerNames()
-    output_layers = [layer_names[i[0] - 1] for i in net.getUnconnectedOutLayers()]
+faster = True
+threshold = 0.6
 
-    return net, classes, output_layers
+model = attempt_load('yolov7.pt', map_location='cpu')
 
-def detect_objects(image_path, net, classes, output_layers):
-    image = cv2.imread(image_path)
-    height, width, _ = image.shape
-    blob = cv2.dnn.blobFromImage(image, 0.00392, (416, 416), (0, 0, 0), True, crop=False)
+classes = None
 
-    net.setInput(blob)
-    outs = net.forward(output_layers)
+with open(args.classes, 'r') as f:
+    classes = [line.strip() for line in f.readlines()]
 
-    class_ids = []
-    confidences = []
-    boxes = []
-    for out in outs:
-        for detection in out:
-            scores = detection[5:]
-            class_id = np.argmax(scores)
-            confidence = scores[class_id]
-            if confidence > 0.5:
-                center_x = int(detection[0] * width)
-                center_y = int(detection[1] * height)
-                w = int(detection[2] * width)
-                h = int(detection[3] * height)
-                x = int(center_x - w / 2)
-                y = int(center_y - h / 2)
-                boxes.append([x, y, w, h])
-                confidences.append(float(confidence))
-                class_ids.append(class_id)
+colors = np.random.uniform(0, 255, size=(len(classes), 3))
 
-    return class_ids, confidences, boxes
+# Pre processing the image
+def process(frame):
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame = torch.from_numpy(frame)
+    frame = frame / 255
+    frame = frame.float()
+    frame = frame.permute(2, 0, 1)
+    frame = frame.unsqueeze(0)
+    return frame
 
-def draw_labels(image, class_ids, confidences, boxes, classes):
-    for i in range(len(class_ids)):
-        class_id = class_ids[i]
-        confidence = confidences[i]
-        box = boxes[i]
-        label = f"{classes[class_id]}: {confidence:.2f}"
-        color = (0, 255, 0)
-        cv2.rectangle(image, (box[0], box[1]), (box[0] + box[2], box[1] + box[3]), color, 2)
-        cv2.putText(image, label, (box[0], box[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+img = cv2.imread(args.image)
+print(img.shape)
+img = cv2.resize(img , (640, 480))
 
-    return image
+img_new = process(img)
 
-if __name__ == "__main__":
-    image_path = r"C:\Users\aarya\Downloads\office.jpeg"
-    
-    net, classes, output_layers = load_yolo_model()
-    class_ids, confidences, boxes = detect_objects(image_path, net, classes, output_layers)
+with torch.inference_mode():
+    preds = model(img_new)[0]
+    preds = non_max_suppression(preds)
 
-    image = cv2.imread(image_path)
-    labeled_image = draw_labels(image.copy(), class_ids, confidences, boxes, classes)
+frame = img
+for j in preds :
+    j = j.clone()
+    for (x1, y1, x2, y2, conf, cls) in j :
+        if conf > threshold :
+            cv2.putText(frame, classes[int(cls)], (int(x1), int(y1) - 10),  cv2.FONT_HERSHEY_DUPLEX, 0.9, colors[int(cls)], 2)
+            frame = cv2.rectangle(frame,(int(x1), int(y1)), (int(x2), int(y2)) ,color = colors[int(cls)], thickness = 2)
 
-    cv2.imshow("YOLO Object Detection", labeled_image)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+cv2.imshow("Result", frame)
+cv2.waitKey()
+cv2.destroyAllWindows()
